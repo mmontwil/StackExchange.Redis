@@ -52,6 +52,58 @@ namespace StackExchange.Redis
             return ExecuteAsync(msg, ResultProcessor.DemandOK);
         }
 
+        public long ClientKill(long? id = null, ClientType? clientType = null, EndPoint endpoint = null, bool skipMe = true, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = GetClientKillMessage(endpoint, id, clientType, skipMe, flags);
+            return ExecuteSync(msg, ResultProcessor.Int64);
+        }
+
+        public Task<long> ClientKillAsync(long? id = null, ClientType? clientType = null, EndPoint endpoint = null, bool skipMe = true, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = GetClientKillMessage(endpoint, id, clientType, skipMe, flags);
+            return ExecuteAsync(msg, ResultProcessor.Int64);
+        }
+        Message GetClientKillMessage(EndPoint endpoint, long? id, ClientType? clientType, bool skipMe, CommandFlags flags)
+        {
+            List<RedisValue> parts = new List<RedisValue>(9);
+            parts.Add(RedisLiterals.KILL);
+            if(id != null)
+            {
+                parts.Add(RedisLiterals.ID);
+                parts.Add(id.Value);
+            }
+            if (clientType != null)
+            {
+                parts.Add(RedisLiterals.TYPE);
+                switch(clientType.Value)
+                {
+                    case ClientType.Normal:
+                        parts.Add(RedisLiterals.normal);
+                        break;
+                    case ClientType.Slave:
+                        parts.Add(RedisLiterals.slave);
+                        break;
+                    case ClientType.PubSub:
+                        parts.Add(RedisLiterals.pubsub);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException("clientType");
+                }
+                parts.Add(id.Value);
+            }
+            if (endpoint != null)
+            {
+                parts.Add(RedisLiterals.ADDR);
+                parts.Add((RedisValue)Format.ToString(endpoint));
+            }
+            if(!skipMe)
+            {
+                parts.Add(RedisLiterals.SKIPME);
+                parts.Add(RedisLiterals.no);
+            }
+            return Message.Create(-1, flags, RedisCommand.CLIENT, parts);
+        }
+
         public ClientInfo[] ClientList(CommandFlags flags = CommandFlags.None)
         {
             var msg = Message.Create(-1, flags, RedisCommand.CLIENT, RedisLiterals.LIST);
@@ -694,5 +746,69 @@ namespace StackExchange.Redis
                 }
             }
         }
+
+        #region Sentinel
+
+        public EndPoint SentinelGetMasterAddressByName(string serviceName, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.GETMASTERADDRBYNAME, (RedisValue)serviceName);
+            return ExecuteSync(msg, ResultProcessor.SentinelMasterEndpoint);
+        }
+
+        public Task<EndPoint> SentinelGetMasterAddressByNameAsync(string serviceName, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.GETMASTERADDRBYNAME, (RedisValue)serviceName);
+            return ExecuteAsync(msg, ResultProcessor.SentinelMasterEndpoint);
+        }
+
+        public KeyValuePair<string, string>[] SentinelMaster(string serviceName, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.MASTER, (RedisValue)serviceName);
+            return ExecuteSync(msg, ResultProcessor.StringPairInterleaved);
+        }
+
+        public Task<KeyValuePair<string, string>[]> SentinelMasterAsync(string serviceName, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.MASTER, (RedisValue)serviceName);
+            return ExecuteAsync(msg, ResultProcessor.StringPairInterleaved);
+        }
+
+        public void SentinelFailover(string serviceName, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.FAILOVER, (RedisValue)serviceName);
+            ExecuteSync(msg, ResultProcessor.DemandOK);
+        }
+
+        public Task SentinelFailoverAsync(string serviceName, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.FAILOVER, (RedisValue)serviceName);
+            return ExecuteAsync(msg, ResultProcessor.DemandOK);
+        }
+
+        public KeyValuePair<string, string>[][] SentinelMasters(CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.MASTERS);
+            return ExecuteSync(msg, ResultProcessor.SentinelArrayOfArrays);
+        }
+
+        public Task<KeyValuePair<string, string>[][]> SentinelMastersAsync(CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.MASTERS);
+            return ExecuteAsync(msg, ResultProcessor.SentinelArrayOfArrays);
+        }
+
+        public KeyValuePair<string, string>[][] SentinelSlaves(string serviceName, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.SLAVES, (RedisValue)serviceName);
+            return ExecuteSync(msg, ResultProcessor.SentinelArrayOfArrays);
+        }
+
+        public Task<KeyValuePair<string, string>[][]> SentinelSlavesAsync(string serviceName, CommandFlags flags = CommandFlags.None)
+        {
+            var msg = Message.Create(-1, flags, RedisCommand.SENTINEL, RedisLiterals.SLAVES, (RedisValue)serviceName);
+            return ExecuteAsync(msg, ResultProcessor.SentinelArrayOfArrays);
+        }
+
+        #endregion
     }
 }

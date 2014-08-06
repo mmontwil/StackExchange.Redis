@@ -46,6 +46,14 @@ namespace StackExchange.Redis
 
         private Version version;
 
+
+        internal void ResetNonConnected()
+        {
+            var tmp = interactive;
+            if (tmp != null) tmp.ResetNonConnected();
+            tmp = subscription;
+            if (tmp != null) tmp.ResetNonConnected();
+        }
         public ServerEndPoint(ConnectionMultiplexer multiplexer, EndPoint endpoint)
         {
             this.multiplexer = multiplexer;
@@ -311,11 +319,28 @@ namespace StackExchange.Redis
             return result;
         }
 
-        internal void FlushScripts()
+        internal void FlushScriptCache()
         {
             lock (knownScripts)
             {
                 knownScripts.Clear();
+            }
+        }
+
+        private string runId;
+        internal string RunId
+        {
+            get { return runId; }
+            set
+            {
+                if (value != runId) // we only care about changes
+                {
+                    // if we had an old run-id, and it has changed, then the
+                    // server has been restarted; which means the script cache
+                    // is toast
+                    if (runId != null) FlushScriptCache();
+                    runId = value;
+                }
             }
         }
 

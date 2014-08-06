@@ -1,5 +1,6 @@
 .hg
 bin
+bin.snk
 obj
 *.suo
 *.user
@@ -13,3 +14,4 @@ Mono/
 *.orig
 redis-cli.exe
 Redis Configs/*.dat
+RedisQFork*.dat

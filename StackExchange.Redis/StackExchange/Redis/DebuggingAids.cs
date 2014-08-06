@@ -101,6 +101,7 @@ namespace StackExchange.Redis
 
     partial class ServerEndPoint
     {
+
         internal void SimulateConnectionFailure()
         {
             var tmp = interactive;

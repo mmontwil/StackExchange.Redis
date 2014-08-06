@@ -77,6 +77,17 @@ namespace StackExchange.Redis
         public static readonly ResultProcessor<string>
                             String = new StringProcessor(),
             ClusterNodesRaw = new ClusterNodesRawProcessor();
+
+        #region Sentinel
+
+        public static readonly ResultProcessor<EndPoint>
+            SentinelMasterEndpoint = new SentinelGetMasterAddressByNameProcessor();
+
+        public static readonly ResultProcessor<KeyValuePair<string, string>[][]>
+            SentinelArrayOfArrays = new SentinelArrayOfArraysProcessor();
+        
+        #endregion
+
         public static readonly ResultProcessor<KeyValuePair<string, string>[]>
             StringPairInterleaved = new StringPairInterleavedProcessor();
         public static readonly TimeSpanProcessor
@@ -537,6 +548,10 @@ namespace StackExchange.Redis
                                                 server.Multiplexer.Trace("Auto-configured server-type: sentinel");
                                                 break;
                                         }
+                                    }
+                                    else if((val = Extract(line, "run_id:")) != null)
+                                    {
+                                        server.RunId = val;
                                     }
                                 }
                             }
@@ -1037,7 +1052,7 @@ namespace StackExchange.Redis
             {
                 if (result.Type == ResultType.Error && result.AssertStarts(NOSCRIPT))
                 { // scripts are not flushed individually, so assume the entire script cache is toast ("SCRIPT FLUSH")
-                    connection.Bridge.ServerEndPoint.FlushScripts();
+                    connection.Bridge.ServerEndPoint.FlushScriptCache();
                     message.SetScriptUnavailable();
                 }
                 // and apply usual processing for the rest
@@ -1084,6 +1099,7 @@ namespace StackExchange.Redis
         private class TracerProcessor : ResultProcessor<bool>
         {
             static readonly byte[]
+                authRequired = Encoding.UTF8.GetBytes("NOAUTH Authentication required."),
                 authFail = Encoding.UTF8.GetBytes("ERR operation not permitted"),
                 loading = Encoding.UTF8.GetBytes("LOADING ");
 
@@ -1098,7 +1114,7 @@ namespace StackExchange.Redis
                 var final = base.SetResult(connection, message, result);
                 if (result.IsError)
                 {
-                    if (result.IsEqual(authFail))
+                    if (result.IsEqual(authFail) || result.IsEqual(authRequired))
                     {
                         connection.RecordConnectionFailed(ConnectionFailureType.AuthenticationFailure);
                     }
@@ -1148,6 +1164,68 @@ namespace StackExchange.Redis
                 }
             }
         }
+
+        #region Sentinel
+
+        sealed class SentinelGetMasterAddressByNameProcessor : ResultProcessor<EndPoint>
+        {
+            protected override bool SetResultCore(PhysicalConnection connection, Message message, RawResult result)
+            {
+                switch (result.Type)
+                {
+                    case ResultType.MultiBulk:
+                        var arr = result.GetItemsAsValues();
+
+                        int port;
+                        if (arr.Count() == 2 && int.TryParse(arr[1], out port))
+                        {
+                            SetResult(message, Format.ParseEndPoint(arr[0], port));
+                            return true;
+                        } 
+                        else if (arr.Count() == 0)
+                        {
+                            SetResult(message, null);
+                            return true;
+                        }
+                        break;
+                }
+                return false;
+            }
+        }
+
+        sealed class SentinelArrayOfArraysProcessor : ResultProcessor<KeyValuePair<string, string>[][]>
+        {
+            protected override bool SetResultCore(PhysicalConnection connection, Message message, RawResult result)
+            {
+                var innerProcessor = StringPairInterleaved as StringPairInterleavedProcessor;
+                if (innerProcessor == null)
+                {
+                    return false;
+                }
+
+                switch (result.Type)
+                {
+                    case ResultType.MultiBulk:
+                        var arrayOfArrays = result.GetArrayOfRawResults();
+
+                        var returnArray = new KeyValuePair<string, string>[arrayOfArrays.Count()][];
+
+                        for (int i = 0; i < arrayOfArrays.Count(); i++)
+                        {
+                            var rawInnerArray = arrayOfArrays[i];
+                            KeyValuePair<string, string>[] kvpArray;
+                            innerProcessor.TryParse(rawInnerArray, out kvpArray);
+                            returnArray[i] = kvpArray;
+                        }
+
+                        SetResult(message, returnArray);
+                        return true;
+                }
+                return false;
+            }
+        }
+
+        #endregion
     }
     internal abstract class ResultProcessor<T> : ResultProcessor
     {

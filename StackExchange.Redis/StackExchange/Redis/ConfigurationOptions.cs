@@ -72,7 +72,7 @@ namespace StackExchange.Redis
                         Version = "version", ConnectTimeout = "connectTimeout", Password = "password",
                         TieBreaker = "tiebreaker", WriteBuffer = "writeBuffer", Ssl = "ssl", SslHost = "sslHost",
                         ConfigChannel = "configChannel", AbortOnConnectFail = "abortConnect", ResolveDns = "resolveDns",
-                        ChannelPrefix = "channelPrefix", Proxy = "proxy";
+                        ChannelPrefix = "channelPrefix", Proxy = "proxy", ConnectRetry = "connectRetry";
             private static readonly Dictionary<string, string> normalizedOptions = new[]
             {
                 AllowAdmin, SyncTimeout,
@@ -80,7 +80,7 @@ namespace StackExchange.Redis
                 Version, ConnectTimeout, Password,
                 TieBreaker, WriteBuffer, Ssl, SslHost,
                 ConfigChannel, AbortOnConnectFail, ResolveDns,
-                ChannelPrefix, Proxy
+                ChannelPrefix, Proxy, ConnectRetry
             }.ToDictionary(x => x, StringComparer.InvariantCultureIgnoreCase);
 
             public static string TryNormalize(string value)
@@ -105,7 +105,7 @@ namespace StackExchange.Redis
 
         private Version defaultVersion;
 
-        private int? keepAlive, syncTimeout, connectTimeout, writeBuffer;
+        private int? keepAlive, syncTimeout, connectTimeout, writeBuffer, connectRetry;
 
         private Proxy? proxy;
 
@@ -154,6 +154,11 @@ namespace StackExchange.Redis
         public string ClientName { get { return clientName; } set { clientName = value; } }
 
         /// <summary>
+        /// The number of times to repeat the initial connect cycle if no servers respond promptly
+        /// </summary>
+        public int ConnectRetry { get { return connectRetry ?? 3; } set { connectRetry = value; } }
+
+        /// <summary>
         /// The command-map associated with this configuration
         /// </summary>
         public CommandMap CommandMap
@@ -184,7 +189,13 @@ namespace StackExchange.Redis
         /// <summary>
         /// Specifies the time in milliseconds that should be allowed for connection
         /// </summary>
-        public int ConnectTimeout { get { return connectTimeout ?? SyncTimeout; } set { connectTimeout = value; } }
+        public int ConnectTimeout {
+            get {
+                if (connectTimeout.HasValue) return connectTimeout.GetValueOrDefault();
+                return Math.Max(5000, SyncTimeout); // default of 5 seconds unless SyncTimeout is higher
+            }
+            set { connectTimeout = value; }
+        }
 
         /// <summary>
         /// The server version to assume
@@ -252,8 +263,10 @@ namespace StackExchange.Redis
         /// <summary>
         /// Parse the configuration from a comma-delimited configuration string
         /// </summary>
+        /// <exception cref="ArgumentNullException"><paramref name="configuration"/> is <c>null</c>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="configuration"/> is empty.</exception>
         public static ConfigurationOptions Parse(string configuration)
-        {
+        {    
             var options = new ConfigurationOptions();
             options.DoParse(configuration, false);
             return options;
@@ -261,6 +274,8 @@ namespace StackExchange.Redis
         /// <summary>
         /// Parse the configuration from a comma-delimited configuration string
         /// </summary>
+        /// <exception cref="ArgumentNullException"><paramref name="configuration"/> is <c>null</c>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="configuration"/> is empty.</exception>
         public static ConfigurationOptions Parse(string configuration, bool ignoreUnknown)
         {
             var options = new ConfigurationOptions();
@@ -296,6 +311,7 @@ namespace StackExchange.Redis
                 CertificateSelectionCallback = CertificateSelectionCallback,
                 ChannelPrefix = ChannelPrefix.Clone(),
                 SocketManager = SocketManager,
+                connectRetry = connectRetry
             };
             foreach (var item in endpoints)
                 options.endpoints.Add(item);
@@ -337,6 +353,7 @@ namespace StackExchange.Redis
             Append(sb, OptionKeys.AbortOnConnectFail, abortOnConnectFail);
             Append(sb, OptionKeys.ResolveDns, resolveDns);
             Append(sb, OptionKeys.ChannelPrefix, (string)ChannelPrefix);
+            Append(sb, OptionKeys.ConnectRetry, connectRetry);
             Append(sb, OptionKeys.Proxy, proxy);
             if(commandMap != null) commandMap.AppendDeltas(sb);
             return sb.ToString();
@@ -427,7 +444,7 @@ namespace StackExchange.Redis
         void Clear()
         {
             clientName = serviceName = password = tieBreaker = sslHost = configChannel = null;
-            keepAlive = syncTimeout = connectTimeout = writeBuffer = null;
+            keepAlive = syncTimeout = connectTimeout = writeBuffer = connectRetry = null;
             allowAdmin = abortOnConnectFail = resolveDns = ssl = null;
             defaultVersion = null;
             endpoints.Clear();
@@ -443,106 +460,117 @@ namespace StackExchange.Redis
 
         private void DoParse(string configuration, bool ignoreUnknown)
         {
-            Clear();
-            if (!string.IsNullOrWhiteSpace(configuration))
+            if (configuration == null)
             {
-                // break it down by commas
-                var arr = configuration.Split(StringSplits.Comma);
-                Dictionary<string, string> map = null;
-                foreach (var paddedOption in arr)
+                throw new ArgumentNullException("configuration");
+            }
+
+            if (string.IsNullOrWhiteSpace(configuration))
+            {
+                throw new ArgumentException("is empty", configuration);
+            }
+
+            Clear();
+
+            // break it down by commas
+            var arr = configuration.Split(StringSplits.Comma);
+            Dictionary<string, string> map = null;
+            foreach (var paddedOption in arr)
+            {
+                var option = paddedOption.Trim();
+
+                if (string.IsNullOrWhiteSpace(option)) continue;
+
+                // check for special tokens
+                int idx = option.IndexOf('=');
+                if (idx > 0)
                 {
-                    var option = paddedOption.Trim();
+                    var key = option.Substring(0, idx).Trim();                        
+                    var value = option.Substring(idx + 1).Trim();
 
-                    if (string.IsNullOrWhiteSpace(option)) continue;
-
-                    // check for special tokens
-                    int idx = option.IndexOf('=');
-                    if (idx > 0)
+                    switch (OptionKeys.TryNormalize(key))
                     {
-                        var key = option.Substring(0, idx).Trim();                        
-                        var value = option.Substring(idx + 1).Trim();
-
-                        switch (OptionKeys.TryNormalize(key))
-                        {
-                            case OptionKeys.SyncTimeout:
-                                SyncTimeout = OptionKeys.ParseInt32(key, value, minValue: 1);
-                                break;
-                            case OptionKeys.AllowAdmin:
-                                AllowAdmin = OptionKeys.ParseBoolean(key, value);
-                                break;
-                            case OptionKeys.AbortOnConnectFail:
-                                AbortOnConnectFail = OptionKeys.ParseBoolean(key, value);
-                                break;
-                            case OptionKeys.ResolveDns:
-                                ResolveDns = OptionKeys.ParseBoolean(key, value);
-                                break;
-                            case OptionKeys.ServiceName:
-                                ServiceName = value;
-                                break;
-                            case OptionKeys.ClientName:
-                                ClientName = value;
-                                break;
-                            case OptionKeys.ChannelPrefix:
-                                ChannelPrefix = value;
-                                break;
-                            case OptionKeys.ConfigChannel:
-                                ConfigurationChannel = value;
-                                break;
-                            case OptionKeys.KeepAlive:
-                                KeepAlive = OptionKeys.ParseInt32(key, value);
-                                break;
-                            case OptionKeys.ConnectTimeout:
-                                ConnectTimeout = OptionKeys.ParseInt32(key, value);
-                                break;
-                            case OptionKeys.Version:
-                                DefaultVersion = OptionKeys.ParseVersion(key, value);
-                                break;
-                            case OptionKeys.Password:
-                                Password = value;
-                                break;
-                            case OptionKeys.TieBreaker:
-                                TieBreaker = value;
-                                break;
-                            case OptionKeys.Ssl:
-                                Ssl = OptionKeys.ParseBoolean(key, value);
-                                break;
-                            case OptionKeys.SslHost:
-                                SslHost = value;
-                                break;
-                            case OptionKeys.WriteBuffer:
-                                WriteBuffer = OptionKeys.ParseInt32(key, value);
-                                break;
-                            case OptionKeys.Proxy:
-                                Proxy = OptionKeys.ParseProxy(key, value);
-                                break;
-                            default:
-                                if (!string.IsNullOrEmpty(key) && key[0] == '$')
+                        case OptionKeys.SyncTimeout:
+                            SyncTimeout = OptionKeys.ParseInt32(key, value, minValue: 1);
+                            break;
+                        case OptionKeys.AllowAdmin:
+                            AllowAdmin = OptionKeys.ParseBoolean(key, value);
+                            break;
+                        case OptionKeys.AbortOnConnectFail:
+                            AbortOnConnectFail = OptionKeys.ParseBoolean(key, value);
+                            break;
+                        case OptionKeys.ResolveDns:
+                            ResolveDns = OptionKeys.ParseBoolean(key, value);
+                            break;
+                        case OptionKeys.ServiceName:
+                            ServiceName = value;
+                            break;
+                        case OptionKeys.ClientName:
+                            ClientName = value;
+                            break;
+                        case OptionKeys.ChannelPrefix:
+                            ChannelPrefix = value;
+                            break;
+                        case OptionKeys.ConfigChannel:
+                            ConfigurationChannel = value;
+                            break;
+                        case OptionKeys.KeepAlive:
+                            KeepAlive = OptionKeys.ParseInt32(key, value);
+                            break;
+                        case OptionKeys.ConnectTimeout:
+                            ConnectTimeout = OptionKeys.ParseInt32(key, value);
+                            break;
+                        case OptionKeys.ConnectRetry:
+                            ConnectRetry = OptionKeys.ParseInt32(key, value);
+                            break;
+                        case OptionKeys.Version:
+                            DefaultVersion = OptionKeys.ParseVersion(key, value);
+                            break;
+                        case OptionKeys.Password:
+                            Password = value;
+                            break;
+                        case OptionKeys.TieBreaker:
+                            TieBreaker = value;
+                            break;
+                        case OptionKeys.Ssl:
+                            Ssl = OptionKeys.ParseBoolean(key, value);
+                            break;
+                        case OptionKeys.SslHost:
+                            SslHost = value;
+                            break;
+                        case OptionKeys.WriteBuffer:
+                            WriteBuffer = OptionKeys.ParseInt32(key, value);
+                            break;
+                        case OptionKeys.Proxy:
+                            Proxy = OptionKeys.ParseProxy(key, value);
+                            break;
+                        default:
+                            if (!string.IsNullOrEmpty(key) && key[0] == '$')
+                            {
+                                RedisCommand cmd;
+                                var cmdName = option.Substring(1, idx - 1);
+                                if (Enum.TryParse(cmdName, true, out cmd))
                                 {
-                                    RedisCommand cmd;
-                                    var cmdName = option.Substring(1, idx - 1);
-                                    if (Enum.TryParse(cmdName, true, out cmd))
-                                    {
-                                        if (map == null) map = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
-                                        map[cmdName] = value;
-                                    }
+                                    if (map == null) map = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
+                                    map[cmdName] = value;
                                 }
-                                else
-                                {
-                                    if(!ignoreUnknown) OptionKeys.Unknown(key);
-                                }
-                                break;
-                        }
-                    }
-                    else
-                    {
-                        var ep = Format.TryParseEndPoint(option);
-                        if (ep != null && !endpoints.Contains(ep)) endpoints.Add(ep);
+                            }
+                            else
+                            {
+                                if(!ignoreUnknown) OptionKeys.Unknown(key);
+                            }
+                            break;
                     }
                 }
-                if (map != null && map.Count != 0)
+                else
                 {
-                    this.CommandMap = CommandMap.Create(map);
+                    var ep = Format.TryParseEndPoint(option);
+                    if (ep != null && !endpoints.Contains(ep)) endpoints.Add(ep);
                 }
+            }
+            if (map != null && map.Count != 0)
+            {
+                this.CommandMap = CommandMap.Create(map);
             }
         }
     }
