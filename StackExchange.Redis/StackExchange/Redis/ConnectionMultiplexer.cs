@@ -1120,14 +1120,15 @@ namespace StackExchange.Redis
                         }
                     }
                 }
-                int attemptsLeft = first ? configuration.ConnectRetry : 1;
+                int attemptsLeft = true ? configuration.ConnectRetry : 1;
 
                 bool healthy = false;
                 do
                 {
-                    if (first)
+                    if (first || true)
                     {
                         attemptsLeft--;
+                   //     if (attemptsLeft == 1) Debugger.Break();
                     }
                     int standaloneCount = 0, clusterCount = 0, sentinelCount = 0;
                     var endpoints = configuration.EndPoints;
@@ -1179,6 +1180,7 @@ namespace StackExchange.Redis
                         Trace(Format.ToString(endpoints[i]) + ": " + task.Status);
                         if (task.IsFaulted)
                         {
+                        //    if (servers[i].IsConnected) Debugger.Break();
                             servers[i].SetUnselectable(UnselectableFlags.DidNotRespond);
                             var aex = task.Exception;
                             foreach (var ex in aex.InnerExceptions)
@@ -1189,6 +1191,7 @@ namespace StackExchange.Redis
                         }
                         else if (task.IsCanceled)
                         {
+                        //    if (servers[i].IsConnected) Debugger.Break();
                             servers[i].SetUnselectable(UnselectableFlags.DidNotRespond);
                             LogLocked(log, "{0} was canceled", Format.ToString(endpoints[i]));
                         }
@@ -1239,12 +1242,14 @@ namespace StackExchange.Redis
                             }
                             else
                             {
+                                if (servers[i].IsConnected) Debugger.Break();
                                 servers[i].SetUnselectable(UnselectableFlags.DidNotRespond);
                                 LogLocked(log, "{0} returned, but incorrectly", Format.ToString(endpoints[i]));
                             }
                         }
                         else
                         {
+                            if (servers[i].IsConnected) Debugger.Break();
                             servers[i].SetUnselectable(UnselectableFlags.DidNotRespond);
                             LogLocked(log, "{0} did not respond", Format.ToString(endpoints[i]));
                         }
@@ -1317,7 +1322,7 @@ namespace StackExchange.Redis
                         LogLocked(log, "retrying; attempts left: " + attemptsLeft + "...");
                     }
                     //WTF("?: " + attempts);
-                } while (first && !healthy && attemptsLeft > 0);
+                } while (!healthy && attemptsLeft > 0);
 
                 if(first && configuration.AbortOnConnectFail && !healthy)
                 {

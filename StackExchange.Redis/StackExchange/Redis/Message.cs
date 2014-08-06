@@ -83,6 +83,7 @@ namespace StackExchange.Redis
         private ResultBox resultBox;
 
         private ResultProcessor resultProcessor;
+        internal bool completed = false;
 
         protected Message(int db, CommandFlags flags, RedisCommand command)
         {
@@ -399,6 +400,11 @@ namespace StackExchange.Redis
         {
             if (resultBox != null)
             {
+                if (completed) {
+                    Console.WriteLine(this.ToString());
+                    return true;
+                }
+                completed = true;
                 return resultBox.TryComplete(isAsync);
             }
             else
