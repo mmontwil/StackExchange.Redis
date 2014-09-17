@@ -400,6 +400,7 @@ namespace StackExchange.Redis
                         if (connectTimeMilliseconds >= multiplexer.RawConfig.ConnectTimeout)
                         {
                             Trace("Aborting connect");
+                            Console.Write('A');
                             // abort and reconnect
                             var snapshot = physical;
                             bool isCurrent;

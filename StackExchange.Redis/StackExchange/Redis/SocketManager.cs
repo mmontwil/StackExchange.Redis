@@ -124,6 +124,7 @@ namespace StackExchange.Redis
             socket.NoDelay = true;
             try
             {
+                Console.Write('C');
                 var ar = socket.BeginConnect(endpoint, EndConnect, Tuple.Create(socket, callback));
                 if (ar.CompletedSynchronously)
                 {
@@ -132,6 +133,7 @@ namespace StackExchange.Redis
                 }
             } catch (NotImplementedException ex)
             {
+                Console.Write("Ec");
                 if (!(endpoint is IPEndPoint))
                 {
                     throw new InvalidOperationException("BeginConnect failed with NotImplementedException; consider using IP endpoints, or enable ResolveDns in the configuration", ex);
