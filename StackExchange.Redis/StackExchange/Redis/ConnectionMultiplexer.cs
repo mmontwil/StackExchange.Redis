@@ -1063,7 +1063,7 @@ namespace StackExchange.Redis
         {
             if (isDisposed) throw new ObjectDisposedException(ToString());
             //if connection failed treat it as first to honor retry logic.
-            first = cause.CompareTo("connection failed") == 0 ? true : first;
+            //first = cause.CompareTo("connection failed") == 0 ? true : first;
             bool showStats = true;
             if (log == null)
             {
