@@ -41,7 +41,8 @@ namespace StackExchange.Redis
             Info = new InfoProcessor();
 
         public static readonly ResultProcessor<long>
-            Int64 = new Int64Processor();
+            Int64 = new Int64Processor(),
+            PubSubNumSub = new PubSubNumSubProcessor();
 
         public static readonly ResultProcessor<double?>
                             NullableDouble = new NullableDoubleProcessor();
@@ -501,6 +502,8 @@ namespace StackExchange.Redis
                                 SetResult(message, true);
                                 return true;
                             }
+                            string masterHost = null, masterPort = null;
+                            bool roleSeen = false;
                             using (var reader = new StringReader(info))
                             {
                                 while ((line = reader.ReadLine()) != null)
@@ -510,6 +513,7 @@ namespace StackExchange.Redis
                                     string val;
                                     if ((val = Extract(line, "role:")) != null)
                                     {
+                                        roleSeen = true;
                                         switch (val)
                                         {
                                             case "master":
@@ -521,6 +525,14 @@ namespace StackExchange.Redis
                                                 server.Multiplexer.Trace("Auto-configured role: slave");
                                                 break;
                                         }
+                                    }
+                                    else if ((val = Extract(line, "master_host:")) != null)
+                                    {
+                                        masterHost = val;
+                                    }
+                                    else if ((val = Extract(line, "master_port:")) != null)
+                                    {
+                                        masterPort = val;
                                     }
                                     else if ((val = Extract(line, "redis_version:")) != null)
                                     {
@@ -553,6 +565,10 @@ namespace StackExchange.Redis
                                     {
                                         server.RunId = val;
                                     }
+                                }
+                                if (roleSeen)
+                                { // these are in the same section, if presnt
+                                    server.MasterEndPoint = Format.TryParseEndPoint(masterHost, masterPort);
                                 }
                             }
                         }
@@ -864,7 +880,7 @@ namespace StackExchange.Redis
             }
         }
 
-        sealed class Int64Processor : ResultProcessor<long>
+        class Int64Processor : ResultProcessor<long>
         {
             protected override bool SetResultCore(PhysicalConnection connection, Message message, RawResult result)
             {
@@ -882,6 +898,23 @@ namespace StackExchange.Redis
                         break;
                 }
                 return false;
+            }
+        }
+        class PubSubNumSubProcessor : Int64Processor
+        {
+            protected override bool SetResultCore(PhysicalConnection connection, Message message, RawResult result)
+            {
+                if(result.Type == ResultType.MultiBulk)
+                {
+                    var arr = result.GetItems();
+                    long val;
+                    if(arr != null && arr.Length == 2 && arr[1].TryGetInt64(out val))
+                    {
+                        SetResult(message, val);
+                        return true;
+                    }
+                }
+                return base.SetResultCore(connection, message, result);
             }
         }
 
@@ -955,7 +988,7 @@ namespace StackExchange.Redis
                             byte[] channelPrefix = connection.ChannelPrefix;
                             for (int i = 0; i < final.Length; i++)
                             {
-                                final[i] = result.AsRedisChannel(channelPrefix);
+                                final[i] = arr[i].AsRedisChannel(channelPrefix);
                             }
                         }
                         SetResult(message, final);

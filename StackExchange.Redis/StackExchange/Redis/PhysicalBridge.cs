@@ -367,6 +367,7 @@ namespace StackExchange.Redis
                 Interlocked.Exchange(ref failConnectCount, 0);
                 serverEndPoint.OnFullyEstablished(connection);
                 multiplexer.RequestWrite(this, true);
+                if(connectionType == ConnectionType.Interactive) serverEndPoint.CheckInfoReplication();
             }
             else
             {
@@ -429,8 +430,16 @@ namespace StackExchange.Redis
                                 tmp.Bridge.ServerEndPoint.ClearUnselectable(UnselectableFlags.DidNotRespond);
                             }
                             tmp.OnHeartbeat();
-                            int writeEverySeconds = serverEndPoint.WriteEverySeconds;
-                            if (writeEverySeconds > 0 && tmp.LastWriteSecondsAgo >= writeEverySeconds)
+                            int writeEverySeconds = serverEndPoint.WriteEverySeconds,
+                                checkConfigSeconds = multiplexer.RawConfig.ConfigCheckSeconds;
+
+                            if(state == (int)State.ConnectedEstablished && connectionType == ConnectionType.Interactive
+                                && checkConfigSeconds > 0 && serverEndPoint.LastInfoReplicationCheckSecondsAgo >= checkConfigSeconds
+                                && serverEndPoint.CheckInfoReplication())
+                            {
+                                // that serves as a keep-alive, if it is accepted
+                            }
+                            else if (writeEverySeconds > 0 && tmp.LastWriteSecondsAgo >= writeEverySeconds)
                             {
                                 Trace("OnHeartbeat - overdue");
                                 if (state == (int)State.ConnectedEstablished)
