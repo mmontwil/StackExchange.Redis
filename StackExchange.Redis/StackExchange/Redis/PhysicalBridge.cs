@@ -391,6 +391,11 @@ namespace StackExchange.Redis
                 switch (state)
                 {
                     case (int)State.Connecting:
+                        var tmp = physical;
+                        Console.Write(state);
+                        if (!tmp.Bridge.Name.Contains("Subs")) {
+                            Console.Write('i');
+                        }
                         int connectTimeMilliseconds = unchecked(Environment.TickCount - Thread.VolatileRead(ref connectStartTicks));
                         if (connectTimeMilliseconds >= multiplexer.RawConfig.ConnectTimeout)
                         {
@@ -410,9 +415,18 @@ namespace StackExchange.Redis
                         break;
                     case (int)State.ConnectedEstablishing:
                     case (int)State.ConnectedEstablished:
-                        var tmp = physical;
+                        tmp = physical;
+                        Console.Write(state);
+                        if (!tmp.Bridge.Name.Contains("Subs")) {
+                            Console.Write('i');
+                        }
+                        if (tmp == null) Debugger.Break();
                         if (tmp != null)
                         {
+                            if (state == (int)State.ConnectedEstablished && tmp.Bridge.ServerEndPoint.unselectableReasons != 0) {
+                                Console.Write('o');
+                                tmp.Bridge.ServerEndPoint.ClearUnselectable(UnselectableFlags.DidNotRespond);
+                            }
                             tmp.OnHeartbeat();
                             int writeEverySeconds = serverEndPoint.WriteEverySeconds;
                             if (writeEverySeconds > 0 && tmp.LastWriteSecondsAgo >= writeEverySeconds)
@@ -439,6 +453,11 @@ namespace StackExchange.Redis
                         }
                         break;
                     case (int)State.Disconnected:
+                        tmp = physical;
+                        Console.Write(state);
+                        if (tmp != null && tmp.Bridge != null && !tmp.Bridge.Name.Contains("Subs")) {
+                            Console.Write('i');
+                        }
                         if (!ifConnectedOnly)
                         {
                             AbortUnsent();

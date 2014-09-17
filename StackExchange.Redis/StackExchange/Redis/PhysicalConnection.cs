@@ -708,8 +708,9 @@ namespace StackExchange.Redis
         partial void OnDebugAbort();
         void ISocketCallback.OnHeartbeat()
         {
-            try
-            {
+            try {
+                Console.Write(",");
+
                 bridge.OnHeartbeat(true); // all the fun code is here
             }
             catch (Exception ex)
